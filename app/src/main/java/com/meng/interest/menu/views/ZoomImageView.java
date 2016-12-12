@@ -5,6 +5,7 @@ import android.graphics.Matrix;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
@@ -35,6 +36,10 @@ public class ZoomImageView extends ImageView implements ViewTreeObserver.OnGloba
     private boolean isDragVertical;
     private boolean isDragHorizontal;
 
+    /*双击放大的成员变量*/
+    private GestureDetector mGestureDetector;
+    private boolean         isAutoScale;
+
     public ZoomImageView(Context context) {
         this(context, null);
     }
@@ -55,6 +60,27 @@ public class ZoomImageView extends ImageView implements ViewTreeObserver.OnGloba
         mScaleGestureDetector = new ScaleGestureDetector(context, this);
         setOnTouchListener(this);
         mDragSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+        //实现双击方法手势
+        mGestureDetector = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                if (isAutoScale) {
+                    return true;
+                }
+                //实现双击方法手势
+                float x = getX();
+                float y = getY();
+                float currentScale = getCurrentScale();
+                if (currentScale < mMidScale) {
+                    postDelayed(new AutoScaleRunnable(mMidScale, x, y), 16);
+                } else {
+                    postDelayed(new AutoScaleRunnable(mInitScale, x, y), 16);
+                }
+                setImageMatrix(mMatrix);
+                isAutoScale = true;
+                return true;
+            }
+        });
     }
 
     @Override
@@ -228,6 +254,10 @@ public class ZoomImageView extends ImageView implements ViewTreeObserver.OnGloba
 
     @Override
     public boolean onTouch(View view, MotionEvent motionEvent) {
+        //双击的时候接受触摸事件 并且不需要去移动
+        if (mGestureDetector.onTouchEvent(motionEvent)) {
+            return true;
+        }
         //将触摸事件传递给ScaleGesture
         mScaleGestureDetector.onTouchEvent(motionEvent);
 
@@ -284,6 +314,7 @@ public class ZoomImageView extends ImageView implements ViewTreeObserver.OnGloba
         return true;
     }
 
+    //边界限制
     private void checkTranslateBounds() {
         float dx = 0;
         float dy = 0;
@@ -310,4 +341,45 @@ public class ZoomImageView extends ImageView implements ViewTreeObserver.OnGloba
         return Math.sqrt(dx * dx + dy * dy) > mDragSlop;
     }
 
+    private class AutoScaleRunnable implements Runnable {
+        private final float BIGGER  = 1.07F;
+        private final float SMALLER = 0.93F;
+        private float targetScale;
+        private float tempScale;
+        private float x;
+        private float y;
+
+        AutoScaleRunnable(float targetScale, float x, float y) {
+            this.targetScale = targetScale;
+            this.x = x;
+            this.y = y;
+            if (getCurrentScale() < targetScale) {
+                tempScale = BIGGER;
+            }
+            if (getCurrentScale() > targetScale) {
+                tempScale = SMALLER;
+            }
+        }
+
+        @Override
+        public void run() {
+            //开始缩放
+            mMatrix.postScale(tempScale, tempScale, x, y);
+            checkoutBounds();
+            setImageMatrix(mMatrix);
+
+            float currentScale = getCurrentScale();
+
+            if ((tempScale > 1.0f && currentScale < targetScale) || (tempScale < 1.0f && currentScale > targetScale)) {
+                postDelayed(this, 16);
+            } else {
+                //设置为目标值
+                float scale = targetScale / currentScale;
+                mMatrix.postScale(scale, scale, x, y);
+                checkoutBounds();
+                setImageMatrix(mMatrix);
+                isAutoScale = false;
+            }
+        }
+    }
 }
