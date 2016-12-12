@@ -8,6 +8,7 @@ import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewTreeObserver;
 import android.widget.ImageView;
 
@@ -23,6 +24,16 @@ public class ZoomImageView extends ImageView implements ViewTreeObserver.OnGloba
     private float                mMaxScale;//最大的缩放值
     private Matrix               mMatrix;
     private ScaleGestureDetector mScaleGestureDetector;
+
+    /*自由移动的成员变量*/
+    private int     mLastPointCount;//记录最后一次多点的个数
+    private float   mLastX;
+    private float   mLastY;//记录上一次X Y的坐标
+    private boolean mIsCanDrag; //根据是否达到阈值 判断是否可以移动
+    private int     mDragSlop;
+
+    private boolean isDragVertical;
+    private boolean isDragHorizontal;
 
     public ZoomImageView(Context context) {
         this(context, null);
@@ -43,6 +54,7 @@ public class ZoomImageView extends ImageView implements ViewTreeObserver.OnGloba
         //多点触控
         mScaleGestureDetector = new ScaleGestureDetector(context, this);
         setOnTouchListener(this);
+        mDragSlop = ViewConfiguration.get(context).getScaledTouchSlop();
     }
 
     @Override
@@ -218,7 +230,84 @@ public class ZoomImageView extends ImageView implements ViewTreeObserver.OnGloba
     public boolean onTouch(View view, MotionEvent motionEvent) {
         //将触摸事件传递给ScaleGesture
         mScaleGestureDetector.onTouchEvent(motionEvent);
+
+        //实现图片的自由移动
+        float x = 0;
+        float y = 0;//记录中心点位置
+        int pointCount = motionEvent.getPointerCount();
+        for (int i = 0; i < pointCount; i++) {
+            x += motionEvent.getX(i);
+            y += motionEvent.getY(i);
+        }
+        x /= pointCount;
+        y /= pointCount;//根据多点的个数和xy坐标 计算出中心坐标
+
+        if (mLastPointCount != pointCount) {
+            mIsCanDrag = false;
+            mLastX = x;
+            mLastY = y;
+        }
+        mLastPointCount = pointCount;
+        switch (motionEvent.getAction()) {
+            case MotionEvent.ACTION_MOVE:
+                //偏移值
+                float dx = x - mLastX;
+                float dy = y - mLastY;
+                if (!mIsCanDrag) {
+                    mIsCanDrag = isMoveAction(dx, dy);
+                } else {
+                    if (null != getDrawable()) {
+                        RectF rectF = getScaleMatrix(getDrawable());
+                        isDragVertical = isDragHorizontal = true;
+                        if (rectF.width() < getWidth()) {
+                            //如果图片的宽度小于了控件的宽度那就横着就不用移动了
+                            dx = 0;
+                            isDragHorizontal = false;
+                        }
+                        if (rectF.height() < getHeight()) {
+                            isDragVertical = false;
+                            dy = 0;
+                        }
+                        mMatrix.postTranslate(dx, dy);
+                        checkTranslateBounds();
+                        setImageMatrix(mMatrix);
+                    }
+                }
+                mLastX = x;
+                mLastY = y;
+                break;
+            case MotionEvent.ACTION_CANCEL:
+            case MotionEvent.ACTION_UP:
+                mLastPointCount = 0;
+                break;
+        }
         return true;
+    }
+
+    private void checkTranslateBounds() {
+        float dx = 0;
+        float dy = 0;
+        RectF rectF = getScaleMatrix(getDrawable());
+
+        int width = getWidth();
+        int height = getHeight();
+        if (rectF.top > 0 && isDragVertical) {
+            dy = -rectF.top;
+        }
+        if (rectF.bottom < height && isDragVertical) {
+            dy = height - rectF.bottom;
+        }
+        if (rectF.left > 0 && isDragHorizontal) {
+            dx = -rectF.left;
+        }
+        if (rectF.right < width && isDragHorizontal) {
+            dx = width - rectF.right;
+        }
+        mMatrix.postTranslate(dx, dy);
+    }
+
+    private boolean isMoveAction(double dx, double dy) {
+        return Math.sqrt(dx * dx + dy * dy) > mDragSlop;
     }
 
 }
